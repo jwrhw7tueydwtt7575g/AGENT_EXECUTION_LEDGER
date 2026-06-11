@@ -35,8 +35,9 @@ services:
         sync: false
 
   # ── Frontend Dashboard (Static Site / Vite) ────────────────
-  - type: static
+  - type: web
     name: agent-ledger-frontend
+    runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
