@@ -4,6 +4,7 @@ import {
     ResponsiveContainer, Cell, PieChart, Pie, Legend
 } from 'recharts';
 import { useApp } from '../AppContext';
+import { apiFetch } from '../api';
 
 const FAILURE_LABELS = {
     F1: 'Silent API Failure',
@@ -29,15 +30,14 @@ const CustomTooltip = ({ active, payload }) => {
 };
 
 export default function AnomalyScorecard() {
-    const { stats, apiBase, runs, liveReceipts } = useApp();
+    const { stats, runs, liveReceipts } = useApp();
     const [anomalies, setAnomalies] = useState([]);
 
     useEffect(() => {
-        fetch(`${apiBase}/anomalies?limit=40`)
-            .then(r => r.json())
+        apiFetch('/anomalies?limit=40')
             .then(d => setAnomalies(d.anomalies || []))
             .catch(() => { });
-    }, [apiBase]);
+    }, []);
 
     const failureDist = (stats?.failure_distribution || []).map((f, i) => ({
         name: FAILURE_LABELS[f._id] || f._id,

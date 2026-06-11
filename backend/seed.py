@@ -3,16 +3,20 @@ Mock data seeder — seeds a MongoDB with realistic Agent ledger receipts
 to simulate an AI agent pipeline actively running.
 """
 import asyncio
+import os
 import random
-import hashlib
-import json
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
+from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 
-MONGO_URL = "mongodb+srv://vivekchaudhari3718:vivekchaudhari3718@cluster1.9qlun5j.mongodb.net/?retryWrites=true&w=majority"
+from core.intercept import _serialise, sha256
 
-DB_NAME = "agent_ledger"
+load_dotenv()
+
+MONGO_URL = os.getenv("MONGO_URL")
+DB_NAME = os.getenv("DB_NAME", "agent_ledger")
 
 TOOLS = [
     "github_search", "web_browser", "code_executor", "file_reader",
@@ -31,10 +35,6 @@ FAILURE_TYPES_MAP = {
     "F7": "Tampered Replay",
     "F8": "Permission Boundary Violation"
 }
-
-
-def sha256_hash(data: str) -> str:
-    return hashlib.sha256(data.encode()).hexdigest()
 
 
 def determine_node_status(drift: float, latency: float, avg_latency: float, anomaly_flags: list, status: str) -> str:
@@ -81,16 +81,28 @@ def generate_receipt(run_id: str, step_index: int, prev_chain_hash: str, avg_lat
     input_data = {"tool": tool_name, "agent": agent_id, "step": step_index, "args": {"query": f"query_{step_index}"}}
     output_data = {"result": f"result_{step_index}", "status": status} if status != "ghost" else None
 
-    input_hash = sha256_hash(json.dumps(input_data, sort_keys=True))
-    output_hash = sha256_hash(json.dumps(output_data, sort_keys=True)) if output_data else None
-    chain_hash = sha256_hash(prev_chain_hash + input_hash + (output_hash or ""))
+    receipt_id = str(uuid.uuid4())
+    timestamp = base_time + timedelta(milliseconds=step_index * avg_latency + random.uniform(-50, 50))
+    input_hash = sha256(_serialise(input_data))
+    output_hash = sha256(_serialise(output_data)) if output_data else None
+    chain_components = {
+        "receipt_id": receipt_id,
+        "run_id": run_id,
+        "step_index": step_index,
+        "tool_name": tool_name,
+        "agent_id": agent_id,
+        "timestamp": timestamp.isoformat(),
+        "input_hash": input_hash,
+        "output_hash": output_hash or "",
+        "status": status,
+        "prev_chain_hash": prev_chain_hash,
+    }
+    chain_hash = sha256(_serialise(chain_components))
 
     node_status = determine_node_status(drift_score, latency_ms, avg_latency, anomaly_flags, status)
 
-    timestamp = base_time + timedelta(milliseconds=step_index * avg_latency + random.uniform(-50, 50))
-
     return {
-        "receipt_id": str(uuid.uuid4()),
+        "receipt_id": receipt_id,
         "run_id": run_id,
         "step_index": step_index,
         "tool_name": tool_name,
@@ -118,6 +130,9 @@ def generate_receipt(run_id: str, step_index: int, prev_chain_hash: str, avg_lat
 
 
 async def seed():
+    if not MONGO_URL:
+        print("Error: MONGO_URL environment variable is not set. Copy .env.example to .env and configure it.")
+        sys.exit(1)
     client = AsyncIOMotorClient(MONGO_URL)
     db = client[DB_NAME]
 
@@ -134,7 +149,7 @@ async def seed():
         agent_name = random.choice(AGENTS)
         num_steps = random.randint(8, 20)
         base_time = datetime.now(timezone.utc) - timedelta(hours=(num_runs - run_idx) * 4)
-        chain_hash = sha256_hash(run_id)
+        chain_hash = sha256(run_id)
 
         receipts = []
         for step in range(num_steps):
@@ -165,7 +180,7 @@ async def seed():
             "total_receipts": len(receipts),
             "avg_drift": round(sum(drift_scores) / len(drift_scores), 4) if drift_scores else 0,
             "max_drift": round(max(drift_scores), 4) if drift_scores else 0,
-            "chain_verified": random.random() > 0.15,
+            "chain_verified": True,
             "ghost_calls": ghost_calls,
             "anomaly_count": anomaly_count,
             "trust_score": max(0, min(1, trust_score)),

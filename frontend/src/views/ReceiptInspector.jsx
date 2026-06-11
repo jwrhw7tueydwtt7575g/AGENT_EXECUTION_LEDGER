@@ -1,25 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
 import { useApp } from '../AppContext';
+import { apiFetch } from '../api';
 
 export default function ReceiptInspector() {
-    const { selectedRunId, apiBase } = useApp();
+    const { selectedRunId } = useApp();
     const [receipts, setReceipts] = useState([]);
     const [selected, setSelected] = useState(null);
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
         if (!selectedRunId) return;
+        setSelected(null);
+        setReceipts([]);
         setLoading(true);
-        fetch(`${apiBase}/runs/${selectedRunId}/receipts`)
-            .then(r => r.json())
+        apiFetch(`/runs/${selectedRunId}/receipts`)
             .then(d => {
                 setReceipts(d.receipts || []);
                 if (d.receipts?.length) setSelected(d.receipts[0]);
             })
             .catch(() => { })
             .finally(() => setLoading(false));
-    }, [selectedRunId, apiBase]);
+    }, [selectedRunId]);
 
     const nodeStatusMap = {
         verified: 'badge-verified',
@@ -150,7 +152,7 @@ export default function ReceiptInspector() {
                                     <Editor
                                         height="200px"
                                         defaultLanguage="json"
-                                        value={JSON.stringify(selected.input_payload, null, 2)}
+                                        value={JSON.stringify(selected.input_payload ?? null, null, 2)}
                                         options={{ readOnly: true, minimap: { enabled: false }, fontSize: 11, scrollBeyondLastLine: false, theme: 'vs-dark' }}
                                         theme="vs-dark"
                                     />
@@ -162,7 +164,7 @@ export default function ReceiptInspector() {
                                     <Editor
                                         height="200px"
                                         defaultLanguage="json"
-                                        value={JSON.stringify(selected.output_payload, null, 2)}
+                                        value={JSON.stringify(selected.output_payload ?? null, null, 2)}
                                         options={{ readOnly: true, minimap: { enabled: false }, fontSize: 11, scrollBeyondLastLine: false, theme: 'vs-dark' }}
                                         theme="vs-dark"
                                     />

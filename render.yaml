@@ -1,0 +1,65 @@
+# =============================================================
+# Render Blueprint — Agent Execution Ledger
+# Deploy: https://dashboard.render.com/blueprints → New Blueprint Instance → connect repo
+#
+# After deploy, set MONGO_URL in the Render dashboard (sync: false below).
+# =============================================================
+
+services:
+  # ── Backend API (Python/FastAPI) ────────────────────────────
+  - type: web
+    name: agent-ledger-backend
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements-prod.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    buildFilter:
+      paths:
+        - backend/**
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
+      - key: ENVIRONMENT
+        value: production
+      - key: DB_NAME
+        value: agent_ledger
+      - key: ANOMALY_BASELINE_MIN_RUNS
+        value: "20"
+      - key: ALLOWED_ORIGINS
+        value: https://agent-ledger-frontend.onrender.com,http://localhost:5173
+      # Set this manually in Render dashboard after deploy
+      - key: MONGO_URL
+        sync: false
+
+  # ── Frontend Dashboard (Static Site / Vite) ────────────────
+  - type: web
+    name: agent-ledger-frontend
+    runtime: static
+    plan: free
+    region: oregon
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    buildFilter:
+      paths:
+        - frontend/**
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: VITE_API_BASE
+        value: https://agent-ledger-backend.onrender.com
+      - key: VITE_WS_URL
+        value: wss://agent-ledger-backend.onrender.com/ws/live
+      - key: VITE_APP_NAME
+        value: Agent Execution Ledger
+      - key: VITE_APP_VERSION
+        value: "1.0.0"
+      - key: VITE_ENABLE_LIVE_FEED
+        value: "true"

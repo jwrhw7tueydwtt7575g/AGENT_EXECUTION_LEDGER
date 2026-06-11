@@ -115,18 +115,26 @@ class LangChainAdapter(BaseLedgerAdapter):
                 try:
                     result = original_run(*args, **kwargs)
                     out = result if isinstance(result, dict) else {"result": str(result)}
+                    latency = (time.time_ns() - start) / 1e6
                     try:
                         loop = asyncio.get_running_loop()
-                        loop.create_task(self.ledger_store.record(point, out, "success", (time.time_ns() - start) / 1e6))
+                        task = loop.create_task(self.ledger_store.record(point, out, "success", latency))
+                        task.add_done_callback(
+                            lambda t: t.exception() and print(f"Ledger record failed: {t.exception()}")
+                        )
                     except RuntimeError:
-                        asyncio.run(self.ledger_store.record(point, out, "success", (time.time_ns() - start) / 1e6))
+                        asyncio.run(self.ledger_store.record(point, out, "success", latency))
                     return result
                 except Exception as e:
+                    latency = (time.time_ns() - start) / 1e6
                     try:
                         loop = asyncio.get_running_loop()
-                        loop.create_task(self.ledger_store.record(point, {"error": str(e)}, "error", (time.time_ns() - start) / 1e6))
+                        task = loop.create_task(self.ledger_store.record(point, {"error": str(e)}, "error", latency))
+                        task.add_done_callback(
+                            lambda t: t.exception() and print(f"Ledger record failed: {t.exception()}")
+                        )
                     except RuntimeError:
-                        asyncio.run(self.ledger_store.record(point, {"error": str(e)}, "error", (time.time_ns() - start) / 1e6))
+                        asyncio.run(self.ledger_store.record(point, {"error": str(e)}, "error", latency))
                     raise
 
             if hasattr(tool, "_run"):
@@ -163,22 +171,40 @@ class CrewAIAdapter(BaseLedgerAdapter):
         run_id = metadata.get("run_id", str(uuid.uuid4()))
         original_kickoff = crew.kickoff
 
-        async def ledger_kickoff(*args, **kwargs):
-            point = InterceptPoint(
-                tool_name="CrewAI/kickoff",
-                agent_id=metadata.get("agent_id", "Crew/orchestrator"),
-                run_id=run_id,
-                input_payload={"args": args, "kwargs": kwargs},
-                framework="CrewAI",
-            )
-            start = time.time_ns()
-            try:
-                result = await original_kickoff(*args, **kwargs)
-                await self.ledger_store.record(point, {"result": str(result)}, "success", (time.time_ns() - start) / 1e6)
-                return result
-            except Exception as e:
-                await self.ledger_store.record(point, {"error": str(e)}, "error", (time.time_ns() - start) / 1e6)
-                raise
+        if asyncio.iscoroutinefunction(original_kickoff):
+            async def ledger_kickoff(*args, **kwargs):
+                point = InterceptPoint(
+                    tool_name="CrewAI/kickoff",
+                    agent_id=metadata.get("agent_id", "Crew/orchestrator"),
+                    run_id=run_id,
+                    input_payload={"args": args, "kwargs": kwargs},
+                    framework="CrewAI",
+                )
+                start = time.time_ns()
+                try:
+                    result = await original_kickoff(*args, **kwargs)
+                    await self.ledger_store.record(point, {"result": str(result)}, "success", (time.time_ns() - start) / 1e6)
+                    return result
+                except Exception as e:
+                    await self.ledger_store.record(point, {"error": str(e)}, "error", (time.time_ns() - start) / 1e6)
+                    raise
+        else:
+            def ledger_kickoff(*args, **kwargs):
+                point = InterceptPoint(
+                    tool_name="CrewAI/kickoff",
+                    agent_id=metadata.get("agent_id", "Crew/orchestrator"),
+                    run_id=run_id,
+                    input_payload={"args": args, "kwargs": kwargs},
+                    framework="CrewAI",
+                )
+                start = time.time_ns()
+                try:
+                    result = original_kickoff(*args, **kwargs)
+                    asyncio.run(self.ledger_store.record(point, {"result": str(result)}, "success", (time.time_ns() - start) / 1e6))
+                    return result
+                except Exception as e:
+                    asyncio.run(self.ledger_store.record(point, {"error": str(e)}, "error", (time.time_ns() - start) / 1e6))
+                    raise
 
         crew.kickoff = ledger_kickoff
         return crew

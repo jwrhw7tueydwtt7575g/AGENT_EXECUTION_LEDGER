@@ -4,6 +4,7 @@ import {
     ResponsiveContainer, ReferenceLine, Legend
 } from 'recharts';
 import { useApp } from '../AppContext';
+import { apiFetch } from '../api';
 
 const STATUS_COLORS = {
     verified: '#48bb78',
@@ -45,7 +46,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export default function DriftTimeline() {
-    const { selectedRunId, apiBase, setView } = useApp();
+    const { selectedRunId } = useApp();
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
 
@@ -53,17 +54,16 @@ export default function DriftTimeline() {
         if (!selectedRunId) return;
         setLoading(true);
         try {
-            const r = await fetch(`${apiBase}/runs/${selectedRunId}/drift`);
-            const d = await r.json();
+            const d = await apiFetch(`/runs/${selectedRunId}/drift`);
             setData(d.drift_timeline || []);
         } catch (_) { }
         setLoading(false);
-    }, [selectedRunId, apiBase]);
+    }, [selectedRunId]);
 
     useEffect(() => { load(); }, [load]);
 
-    const maxDrift = Math.max(...data.map(d => d.drift_score || 0));
-    const avgDrift = data.length ? (data.reduce((s, d) => s + (d.drift_score || 0), 0) / data.length).toFixed(3) : 0;
+    const maxDrift = data.length ? Math.max(...data.map(d => d.drift_score || 0)) : 0;
+    const avgDrift = data.length ? (data.reduce((s, d) => s + (d.drift_score || 0), 0) / data.length).toFixed(3) : '0';
     const criticalPoints = data.filter(d => d.drift_score > 0.6).length;
     const worstStep = data.reduce((worst, d) => (!worst || d.drift_score > worst.drift_score) ? d : worst, null);
 
@@ -76,7 +76,7 @@ export default function DriftTimeline() {
                 </p>
             </div>
 
-            {/* Summary cards */}
+            {!loading && data.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 20 }}>
                 {[
                     { label: 'Avg Drift', value: avgDrift, color: 'var(--accent-blue)' },
@@ -90,6 +90,7 @@ export default function DriftTimeline() {
                     </div>
                 ))}
             </div>
+            )}
 
             <div className="card">
                 <div className="card-header">

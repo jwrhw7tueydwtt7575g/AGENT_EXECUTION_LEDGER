@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../AppContext';
+import { apiFetch } from '../api';
 
 const STATUS_COLORS = {
     verified: '#48bb78',
@@ -15,6 +16,7 @@ function RunSelect({ label, value, onChange, runs }) {
         <div>
             <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
             <select value={value} onChange={e => onChange(e.target.value)} style={{ width: '100%' }}>
+                <option value="">Select a run…</option>
                 {runs.map(r => (
                     <option key={r.run_id} value={r.run_id}>
                         {r.run_id.slice(0, 8)}... • {r.agent_name} • {r.framework} • {r.total_steps} steps
@@ -42,7 +44,7 @@ function CellStatus({ receipt }) {
 }
 
 export default function RunComparison() {
-    const { runs, apiBase } = useApp();
+    const { runs } = useApp();
     const [runIdA, setRunIdA] = useState('');
     const [runIdB, setRunIdB] = useState('');
     const [diffResult, setDiffResult] = useState(null);
@@ -54,9 +56,9 @@ export default function RunComparison() {
             setRunIdA(runs[0].run_id);
             setRunIdB(runs[1].run_id);
         }
-    }, [runs]);
+    }, [runs, runIdA]);
 
-    const compare = async () => {
+    const compare = useCallback(async () => {
         if (!runIdA || !runIdB || runIdA === runIdB) {
             setError('Please select two different runs');
             return;
@@ -64,25 +66,27 @@ export default function RunComparison() {
         setError('');
         setLoading(true);
         try {
-            const r = await fetch(`${apiBase}/runs/compare`, {
+            const result = await apiFetch('/runs/compare', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ run_id_a: runIdA, run_id_b: runIdB })
+                body: JSON.stringify({ run_id_a: runIdA, run_id_b: runIdB }),
             });
-            setDiffResult(await r.json());
+            setDiffResult(result);
         } catch (e) {
-            setError('Failed to load comparison');
+            setError(e.message || 'Failed to load comparison');
+            setDiffResult(null);
         }
         setLoading(false);
-    };
+    }, [runIdA, runIdB]);
 
     useEffect(() => {
         if (runIdA && runIdB && runIdA !== runIdB) compare();
-    }, [runIdA, runIdB]);
+    }, [runIdA, runIdB, compare]);
 
     const divergedSteps = diffResult?.diff?.filter(s => s.diverged).length || 0;
     const totalSteps = diffResult?.diff?.length || 0;
-    const similarity = totalSteps ? ((1 - divergedSteps / totalSteps) * 100).toFixed(1) : null;
+    const similarityNum = totalSteps ? (1 - divergedSteps / totalSteps) * 100 : null;
+    const similarity = similarityNum != null ? similarityNum.toFixed(1) : null;
 
     return (
         <div className="fade-in">
@@ -105,7 +109,7 @@ export default function RunComparison() {
                             {[
                                 { label: 'Total Steps Compared', value: totalSteps },
                                 { label: 'Diverged Steps', value: divergedSteps, color: divergedSteps > 0 ? 'var(--status-critical)' : 'var(--status-verified)' },
-                                { label: 'Similarity', value: `${similarity}%`, color: similarity > 80 ? 'var(--status-verified)' : 'var(--status-significant)' },
+                                { label: 'Similarity', value: `${similarity}%`, color: (similarityNum ?? 0) > 80 ? 'var(--status-verified)' : 'var(--status-significant)' },
                             ].map(({ label, value, color }) => (
                                 <div key={label} className="metric-card" style={{ flex: 1, minWidth: 120 }}>
                                     <div className="label">{label}</div>
@@ -123,7 +127,7 @@ export default function RunComparison() {
                 </div>
             )}
 
-            {diffResult && !loading && (
+            {diffResult?.diff && !loading && (
                 <div className="card">
                     <div className="card-header">
                         <h3>Step-by-Step Diff</h3>
@@ -137,7 +141,6 @@ export default function RunComparison() {
                         </div>
                     </div>
                     <div>
-                        {/* Header */}
                         <div style={{ display: 'grid', gridTemplateColumns: '48px 1fr 1fr', gap: 1, background: 'var(--bg-secondary)', padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
                             <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)' }}>Step</div>
                             <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--accent-blue)' }}>Run A</div>
